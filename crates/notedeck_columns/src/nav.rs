@@ -595,7 +595,6 @@ fn render_nav_body(
             } else {
                 ShowNoteClientOptions::Hide
             };
-            let mut show_full_date = app.note_options.contains(NoteOptions::ShowFullDate);
 
             SettingsView::new(
                 ctx.i18n,
@@ -603,7 +602,6 @@ fn render_nav_body(
                 &mut selected_language,
                 &mut theme,
                 &mut show_note_client,
-                &mut show_full_date,
             )
             .ui(ui)
             .map(RenderNavAction::SettingsAction)

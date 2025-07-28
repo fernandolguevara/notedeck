@@ -212,14 +212,7 @@ impl<'a, 'd> NoteView<'a, 'd> {
             let (_id, rect) = ui.allocate_space(egui::vec2(50.0, 20.0));
             ui.allocate_rect(rect, Sense::hover());
             ui.put(rect, |ui: &mut egui::Ui| {
-                render_notetime(
-                    ui,
-                    self.note_context.i18n,
-                    self.note.created_at(),
-                    false,
-                    self.options().contains(NoteOptions::ShowFullDate),
-                )
-                .response
+                render_notetime(ui, self.note_context.i18n, self.note.created_at(), false).response
             });
             let (_id, rect) = ui.allocate_space(egui::vec2(150.0, 20.0));
             ui.allocate_rect(rect, Sense::hover());
@@ -365,14 +358,13 @@ impl<'a, 'd> NoteView<'a, 'd> {
         note: &Note,
         profile: &Result<nostrdb::ProfileRecord<'_>, nostrdb::Error>,
         show_unread_indicator: bool,
-        show_full_date: bool,
     ) {
         let horiz_resp = ui
             .horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = if is_narrow(ui.ctx()) { 1.0 } else { 2.0 };
                 ui.add(Username::new(i18n, profile.as_ref().ok(), note.pubkey()).abbreviated(20));
 
-                render_notetime(ui, i18n, note.created_at(), true, show_full_date)
+                render_notetime(ui, i18n, note.created_at(), true)
             })
             .response;
 
@@ -420,7 +412,6 @@ impl<'a, 'd> NoteView<'a, 'd> {
                                         self.note,
                                         profile,
                                         self.show_unread_indicator,
-                                        self.options().contains(NoteOptions::ShowFullDate),
                                     );
                                 })
                                 .response
@@ -506,7 +497,6 @@ impl<'a, 'd> NoteView<'a, 'd> {
                     self.note,
                     profile,
                     self.show_unread_indicator,
-                    self.options().contains(NoteOptions::ShowFullDate),
                 );
                 ui.horizontal(|ui| 's: {
                     ui.spacing_mut().item_spacing.x = if is_narrow(ui.ctx()) { 1.0 } else { 2.0 };
@@ -863,19 +853,14 @@ fn render_notetime(
     i18n: &mut Localization,
     created_at: u64,
     before: bool,
-    show_full_date: bool,
 ) -> egui::InnerResponse<()> {
     ui.horizontal(|ui| {
         if before {
             secondary_label(ui, "⋅");
         }
 
-        if show_full_date {
-            let created_at = notedeck::time_format(i18n, created_at as i64);
-            secondary_label(ui, created_at);
-        } else {
-            secondary_label(ui, notedeck::time_ago_since(i18n, created_at));
-        }
+        let created_at = notedeck::time_format(i18n, created_at as i64);
+        secondary_label(ui, created_at);
 
         if !before {
             secondary_label(ui, "⋅");

@@ -3423,6 +3423,7 @@ dependencies = [
  "base32",
  "bech32",
  "bincode",
+ "chrono",
  "dirs",
  "eframe",
  "egui",
