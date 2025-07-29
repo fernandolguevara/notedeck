@@ -8,6 +8,7 @@ use notedeck_ui::note::NoteResponse;
 use notedeck_ui::{NoteOptions, NoteView};
 
 use crate::timeline::thread::{NoteSeenFlags, ParentState, Threads};
+use crate::timeline::ThreadSelection;
 
 pub struct ThreadView<'a, 'd> {
     threads: &'a mut Threads,
@@ -23,7 +24,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         threads: &'a mut Threads,
-        selected_note_id: &'a [u8; 32],
+        selection: &'a ThreadSelection,
         note_options: NoteOptions,
         note_context: &'a mut NoteContext<'d>,
         jobs: &'a mut JobsCache,
@@ -31,7 +32,7 @@ impl<'a, 'd> ThreadView<'a, 'd> {
         let id_source = egui::Id::new("threadscroll_threadview");
         ThreadView {
             threads,
-            selected_note_id,
+            selected_note_id: selection.selected_or_root(),
             note_options,
             id_source,
             note_context,
@@ -81,14 +82,16 @@ impl<'a, 'd> ThreadView<'a, 'd> {
             return None;
         };
 
-        self.threads.update(
+        if self.threads.update(
             &cur_note,
             self.note_context.note_cache,
             self.note_context.ndb,
             txn,
             self.note_context.unknown_ids,
             self.col,
-        );
+        ) {
+            return Some(NoteAction::MissingThreadSub);
+        }
 
         let cur_node = self.threads.threads.get(&self.selected_note_id).unwrap();
 

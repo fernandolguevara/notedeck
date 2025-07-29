@@ -55,7 +55,7 @@ pub use muted::{MuteFun, Muted};
 pub use name::NostrName;
 pub use note::{
     BroadcastContext, ContextSelection, NoteAction, NoteContext, NoteContextSelection, NoteRef,
-    RootIdError, RootNoteId, RootNoteIdBuf, ScrollInfo, ZapAction,
+    OpenColumnInfo, RootIdError, RootNoteId, RootNoteIdBuf, ScrollInfo, ZapAction,
 };
 pub use notecache::{CachedNote, NoteCache};
 pub use persist::*;

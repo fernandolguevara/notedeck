@@ -11,7 +11,7 @@ use egui::{Color32, Hyperlink, RichText};
 use nostrdb::{BlockType, Mention, Note, NoteKey, Transaction};
 use tracing::warn;
 
-use notedeck::{IsFollowing, NoteCache, NoteContext};
+use notedeck::{tr, IsFollowing, NoteCache, NoteContext, OpenColumnInfo};
 
 use super::media::{find_renderable_media, image_carousel, RenderableMedia};
 
@@ -170,6 +170,7 @@ pub fn render_note_contents(
                 BlockType::MentionBech32 => match block.as_mention().unwrap() {
                     Mention::Profile(profile) => {
                         let act = crate::Mention::new(
+                            note_context.i18n,
                             note_context.ndb,
                             note_context.img_cache,
                             txn,
@@ -184,6 +185,7 @@ pub fn render_note_contents(
 
                     Mention::Pubkey(npub) => {
                         let act = crate::Mention::new(
+                            note_context.i18n,
                             note_context.ndb,
                             note_context.img_cache,
                             txn,
@@ -215,7 +217,25 @@ pub fn render_note_contents(
                         .on_hover_cursor(egui::CursorIcon::PointingHand);
 
                     if resp.clicked() {
-                        note_action = Some(NoteAction::Hashtag(block.as_str().to_string()));
+                        if ui.input(|i| i.modifiers.ctrl) || ui.input(|i| i.modifiers.command) {
+                            note_action = Some(NoteAction::OpenColumn(OpenColumnInfo::Hashtag(
+                                block.as_str().to_string(),
+                            )));
+                        } else {
+                            note_action = Some(NoteAction::Hashtag(block.as_str().to_string()));
+                        }
+                    } else {
+                        if ui.input(|i| i.modifiers.ctrl) || ui.input(|i| i.modifiers.command) {
+                            resp.on_hover_text_at_pointer(format!(
+                                "{} + Click {}",
+                                if ui.input(|i| (i.modifiers.command)) {
+                                    "Command"
+                                } else {
+                                    "Ctrl"
+                                },
+                                tr!(note_context.i18n, "to open hashtag in a new column", "")
+                            ));
+                        }
                     }
                 }
 

@@ -1,4 +1,5 @@
 use crate::{
+    actionbar::NotesOpenResult,
     args::{ColumnsArgs, ColumnsFlag},
     column::Columns,
     decks::{Decks, DecksCache},
@@ -9,7 +10,9 @@ use crate::{
     storage,
     subscriptions::{SubKind, Subscriptions},
     support::Support,
-    timeline::{self, kind::ListKind, thread::Threads, TimelineCache, TimelineKind},
+    timeline::{
+        self, kind::ListKind, thread::Threads, ThreadSelection, TimelineCache, TimelineKind,
+    },
     ui::{self, DesktopSidePanel, SidePanelAction},
     view_state::ViewState,
     Result,
@@ -20,7 +23,7 @@ use enostr::{ClientMessage, PoolRelay, Pubkey, RelayEvent, RelayMessage, RelayPo
 use nostrdb::Transaction;
 use notedeck::{
     tr, ui::is_narrow, Accounts, AppAction, AppContext, DataPath, DataPathType, FilterState,
-    Localization, UnknownIds,
+    Localization, OpenColumnInfo, UnknownIds,
 };
 use notedeck_ui::{jobs::JobsCache, NoteOptions};
 use std::collections::{BTreeSet, HashMap};
@@ -481,7 +484,46 @@ impl Damus {
 
         let jobs = JobsCache::default();
 
-        let threads = Threads::default();
+        let mut threads = Threads::default();
+
+        if let Some(columns) = decks_cache.active_columns(&app_context.accounts) {
+            for (col_idx, column) in columns.columns().iter().enumerate() {
+                let route = column.router.top();
+                match route {
+                    Route::Thread(ts) => {
+                        let txn = Transaction::new(app_context.ndb).unwrap();
+                        threads
+                            .open(app_context.ndb, &txn, app_context.pool, &ts, true, col_idx)
+                            .map(NotesOpenResult::Thread)
+                            .unwrap()
+                            .process(
+                                &mut threads,
+                                app_context.ndb,
+                                app_context.note_cache,
+                                &txn,
+                                &mut timeline_cache,
+                                app_context.unknown_ids,
+                            );
+                    }
+                    Route::Timeline(kind) => match *kind {
+                        TimelineKind::Profile(_) | TimelineKind::Hashtag(_) => {
+                            let txn = Transaction::new(app_context.ndb).unwrap();
+                            timeline_cache
+                                .open(
+                                    app_context.ndb,
+                                    app_context.note_cache,
+                                    &txn,
+                                    app_context.pool,
+                                    &kind,
+                                )
+                                .map(NotesOpenResult::Timeline);
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+        }
 
         Self {
             subscriptions: Subscriptions::default(),
@@ -557,6 +599,92 @@ impl Damus {
     pub fn unrecognized_args(&self) -> &BTreeSet<String> {
         &self.unrecognized_args
     }
+
+    fn process_open_column(
+        &mut self,
+        info: &OpenColumnInfo,
+        next_col: usize,
+        app_ctx: &mut AppContext,
+    ) {
+        match info {
+            OpenColumnInfo::Hashtag(htag) => {
+                let kind = TimelineKind::Hashtag(vec![htag.clone()]);
+                let txn = Transaction::new(app_ctx.ndb).unwrap();
+
+                self.timeline_cache
+                    .open(app_ctx.ndb, app_ctx.note_cache, &txn, app_ctx.pool, &kind)
+                    .map(NotesOpenResult::Timeline);
+
+                let route = Route::Timeline(kind.clone());
+
+                let columns = self.columns_mut(app_ctx.i18n, app_ctx.accounts);
+
+                columns.new_column_at_with_route(next_col, route);
+                columns.select_column(next_col as i32);
+            }
+            OpenColumnInfo::Profile(pubkey) => {
+                let kind = TimelineKind::Profile(*pubkey);
+                let txn = Transaction::new(app_ctx.ndb).unwrap();
+                let route = Route::profile(*pubkey);
+
+                self.timeline_cache
+                    .open(app_ctx.ndb, app_ctx.note_cache, &txn, app_ctx.pool, &kind)
+                    .map(NotesOpenResult::Timeline);
+
+                let columns = self.columns_mut(app_ctx.i18n, app_ctx.accounts);
+
+                columns.new_column_at_with_route(next_col, route);
+                columns.select_column(next_col as i32);
+            }
+            OpenColumnInfo::Note { note_id } => 'ex: {
+                let txn = Transaction::new(app_ctx.ndb).unwrap();
+                let Ok(thread_selection) =
+                    ThreadSelection::from_note_id(app_ctx.ndb, app_ctx.note_cache, &txn, *note_id)
+                else {
+                    tracing::error!("No thread selection for {}?", hex::encode(note_id.bytes()));
+                    break 'ex;
+                };
+                let route = Route::Thread(thread_selection.clone());
+
+                self.threads
+                    .open(
+                        app_ctx.ndb,
+                        &txn,
+                        app_ctx.pool,
+                        &thread_selection,
+                        true,
+                        next_col,
+                    )
+                    .map(NotesOpenResult::Thread)
+                    .unwrap()
+                    .process(
+                        &mut self.threads,
+                        app_ctx.ndb,
+                        app_ctx.note_cache,
+                        &txn,
+                        &mut self.timeline_cache,
+                        app_ctx.unknown_ids,
+                    );
+
+                let columns = self.columns_mut(app_ctx.i18n, app_ctx.accounts);
+
+                columns.new_column_at_with_route(next_col, route);
+                columns.select_column(next_col as i32);
+            }
+            OpenColumnInfo::Quote(note_id) => {
+                let columns = self.columns_mut(app_ctx.i18n, app_ctx.accounts);
+
+                columns.new_column_at_with_route(next_col, Route::quote(*note_id));
+                columns.select_column(next_col as i32);
+            }
+            OpenColumnInfo::Reply(note_id) => {
+                let columns = self.columns_mut(app_ctx.i18n, app_ctx.accounts);
+
+                columns.new_column_at_with_route(next_col, Route::reply(*note_id));
+                columns.select_column(next_col as i32);
+            }
+        }
+    }
 }
 
 /*
@@ -599,6 +727,11 @@ fn render_damus_mobile(
 
                 ProcessNavResult::PfpClicked => {
                     app_action = Some(AppAction::ToggleChrome);
+                }
+
+                ProcessNavResult::OpenColumn((col, info)) => {
+                    let next_col = *col + 1;
+                    app.process_open_column(info, next_col, app_ctx);
                 }
             }
         }
@@ -716,9 +849,9 @@ fn timelines_view(
     ui: &mut egui::Ui,
     sizes: Size,
     app: &mut Damus,
-    ctx: &mut AppContext<'_>,
+    app_ctx: &mut AppContext<'_>,
 ) -> Option<AppAction> {
-    let num_cols = get_active_columns(ctx.accounts, &app.decks_cache).num_columns();
+    let num_cols = get_active_columns(app_ctx.accounts, &app.decks_cache).num_columns();
     let mut side_panel_action: Option<nav::SwitchingAction> = None;
     let mut responses = Vec::with_capacity(num_cols);
 
@@ -730,9 +863,9 @@ fn timelines_view(
             strip.cell(|ui| {
                 let rect = ui.available_rect_before_wrap();
                 let side_panel = DesktopSidePanel::new(
-                    ctx.accounts.get_selected_account(),
+                    app_ctx.accounts.get_selected_account(),
                     &app.decks_cache,
-                    ctx.i18n,
+                    app_ctx.i18n,
                 )
                 .show(ui);
 
@@ -740,9 +873,9 @@ fn timelines_view(
                     if side_panel.response.clicked() || side_panel.response.secondary_clicked() {
                         if let Some(action) = DesktopSidePanel::perform_action(
                             &mut app.decks_cache,
-                            ctx.accounts,
+                            app_ctx.accounts,
                             side_panel.action,
-                            ctx.i18n,
+                            app_ctx.i18n,
                         ) {
                             side_panel_action = Some(action);
                         }
@@ -777,7 +910,7 @@ fn timelines_view(
                         inner.set_right(rect.right() - v_line_stroke.width);
                         inner
                     };
-                    responses.push(nav::render_nav(col_index, inner_rect, app, ctx, ui));
+                    responses.push(nav::render_nav(col_index, inner_rect, app, app_ctx, ui));
 
                     // vertical line
                     ui.painter()
@@ -798,13 +931,18 @@ fn timelines_view(
     let mut save_cols = false;
     if let Some(action) = side_panel_action {
         save_cols = save_cols
-            || action.process(&mut app.timeline_cache, &mut app.decks_cache, ctx, ui.ctx());
+            || action.process(
+                &mut app.timeline_cache,
+                &mut app.decks_cache,
+                app_ctx,
+                ui.ctx(),
+            );
     }
 
     let mut app_action: Option<AppAction> = None;
 
     for response in responses {
-        let nav_result = response.process_render_nav_response(app, ctx, ui);
+        let nav_result = response.process_render_nav_response(app, app_ctx, ui);
 
         if let Some(nr) = &nav_result {
             match nr {
@@ -812,6 +950,13 @@ fn timelines_view(
 
                 ProcessNavResult::PfpClicked => {
                     app_action = Some(AppAction::ToggleChrome);
+                }
+
+                ProcessNavResult::OpenColumn((col, info)) => {
+                    let next_col = *col + 1;
+                    app.process_open_column(info, next_col, app_ctx);
+
+                    save_cols = true
                 }
             }
         }
@@ -822,7 +967,7 @@ fn timelines_view(
     }
 
     if save_cols {
-        storage::save_decks_cache(ctx.path, &app.decks_cache);
+        storage::save_decks_cache(app_ctx.path, &app.decks_cache);
     }
 
     app_action

@@ -81,16 +81,10 @@ pub fn render_thread_route(
     // default truncated everywher eelse
     note_options.set(NoteOptions::Truncate, false);
 
-    ui::ThreadView::new(
-        threads,
-        selection.selected_or_root(),
-        note_options,
-        note_context,
-        jobs,
-    )
-    .id_source(col)
-    .ui(ui)
-    .map(Into::into)
+    ui::ThreadView::new(threads, selection, note_options, note_context, jobs)
+        .id_source(col)
+        .ui(ui)
+        .map(Into::into)
 }
 
 #[allow(clippy::too_many_arguments)]

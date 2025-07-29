@@ -117,10 +117,16 @@ fn render_text_segments(
                 );
             }
             TextSegment::UserMention(pubkey) | TextSegment::ThreadUserMention(pubkey) => {
-                let action = Mention::new(note_context.ndb, note_context.img_cache, txn, pubkey)
-                    .size(size)
-                    .selectable(selectable)
-                    .show(ui);
+                let action = Mention::new(
+                    note_context.i18n,
+                    note_context.ndb,
+                    note_context.img_cache,
+                    txn,
+                    pubkey,
+                )
+                .size(size)
+                .selectable(selectable)
+                .show(ui);
 
                 if action.is_some() {
                     note_action = action;
